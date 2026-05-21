@@ -30,29 +30,35 @@ struct derived_read_op : I_read_op {
 
 
 struct read_op {
-    handle_t inner;
-    handle_t outer;
+    handle_t inner{};
+    handle_t outer{};
 
     void complete() noexcept {
-        if (inner && !inner.done()) {
-            inner.resume();
+        auto inner_handle = inner;
+        auto outer_handle = outer;
+        if (inner_handle && !inner_handle.done()) {
+            inner_handle.resume();
         }
-        if (inner.done()) {
-            outer.resume();
+        if (inner_handle && inner_handle.done() && outer_handle &&
+            !outer_handle.done()) {
+            outer_handle.resume();
         }
     }
 };
 
 struct write_op {
-    handle_t inner;
-    handle_t outer;
+    handle_t inner{};
+    handle_t outer{};
 
     void complete() noexcept {
-        if (inner && !inner.done()) {
-            inner.resume();
+        auto inner_handle = inner;
+        auto outer_handle = outer;
+        if (inner_handle && !inner_handle.done()) {
+            inner_handle.resume();
         }
-        if (inner.done() && outer) {
-            outer.resume();
+        if (inner_handle && inner_handle.done() && outer_handle &&
+            !outer_handle.done()) {
+            outer_handle.resume();
         }
     }
 };
