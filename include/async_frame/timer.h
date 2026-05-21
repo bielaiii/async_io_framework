@@ -2,6 +2,7 @@
 #define TIMER_TASK_HEADER
 #include <chrono>
 #include <coroutine>
+#include <cstdint>
 #include <cstring>
 #include <ctime>
 #include <format>
@@ -115,12 +116,19 @@ public:
         }
     }
 
+    void consume() noexcept {
+        uint64_t expirations = 0;
+        while (::read(fd_.fd(), &expirations, sizeof(expirations)) == -1 &&
+               errno == EINTR) {
+        }
+    }
+
     // cur save the current setting, epoll resume with this address
     // queue.top() == cur
 
     TimerEvent &operator++(int) {
         if (waiting_queue.empty()) {
-            memset(&cur, 0, sizeof(TimerTask));
+            cur = TimerTask{};
             return *this;
         }
         cur                    = waiting_queue.top();
@@ -144,6 +152,7 @@ public:
         if (cur.time_point > final_time) {
             waiting_queue.push(cur);
             cur = task_;
+            update_timer(final_time);
         } else {
             waiting_queue.push(task_);
         }

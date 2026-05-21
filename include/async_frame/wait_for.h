@@ -44,10 +44,11 @@ struct timer_awaiter {
     }
     std::error_code await_resume() noexcept {
         auto &instance = TimerEvent::get_instance();
+        instance.consume();
         instance++;
-        //if (instance.empty()) {
-        //    s.remove_timer(instance.fd());
-        //}
+        if (instance.current().time_point == TimerEvent::time_point_t{}) {
+            s.remove_timer(instance.fd());
+        }
         return ec;
     }
 };
