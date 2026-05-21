@@ -21,6 +21,18 @@ namespace detail {
 
 using connect_result = std::error_code;
 
+inline std::error_code connect_error(Connection_Viewer conn) noexcept {
+    int err = 0;
+    socklen_t len = sizeof(err);
+    if (::getsockopt(conn.fd(), SOL_SOCKET, SO_ERROR, &err, &len) == -1) {
+        return {errno, std::generic_category()};
+    }
+    if (err != 0) {
+        return {err, std::generic_category()};
+    }
+    return {};
+}
+
 template <typename SCHEDULER, typename FAMILY>
 struct inner_connect_awaiter {
     handle_t outer_handle;
@@ -40,9 +52,10 @@ struct inner_connect_awaiter {
         scheduler.submit_connect(conn.fd(), &fd_, use_awaiter_t{});
     }
 
-    void await_resume() noexcept {
+    std::error_code await_resume() noexcept {
        // scheduler.remove_interest(conn, register_type::EVENT_CONNECT, &fd_);
        scheduler.remove_connect(conn.fd());
+       return connect_error(conn);
     }
 };
 
@@ -60,10 +73,10 @@ async_connect_impl(SCHEDULER &scheduler, Connection_Viewer conn,
     if (stat_ == connect_status::ERROR) {
         co_return {errno, std::generic_category()};
     }
-    co_await inner_connect_awaiter<SCHEDULER, FAMILY>{
+    auto ec = co_await inner_connect_awaiter<SCHEDULER, FAMILY>{
         .outer_handle = outer_handle, .scheduler = scheduler, .conn = conn};
 
-    co_return {};
+    co_return ec;
 }
 
 template <typename SCHEDULER, typename FAMILY = IPV4, typename PROTOCAL = TCP>

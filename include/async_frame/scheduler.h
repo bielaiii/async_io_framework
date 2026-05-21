@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <unordered_map>
 #include <execution>
 #include <format>
 #include <ios>
@@ -37,9 +38,10 @@ class Scheduler {
     Epoll_Manager epoll_manager_;
     struct fd_state {
         epoll_event ev;
-        fd_ops *ops;
+        read_op *read{};
+        write_op *write{};
     };
-    std::unordered_map<int, fd_state>fd_to_op;
+    std::unordered_map<int, fd_state> fd_to_op;
 
 public:
     using share_handle           = std::shared_ptr<std::coroutine_handle<>>;
@@ -69,20 +71,28 @@ public:
             for (int i = 0; i < size_; i++) {
 
                 auto each_ = evs[i];
-                auto ev    = fd_to_op[each_.data.fd];
-                if (each_.events & EPOLLIN) {
+                auto it    = fd_to_op.find(each_.data.fd);
+                if (it == fd_to_op.end()) {
+                    continue;
+                }
+                auto &ev = it->second;
+                const auto read_ready =
+                    (each_.events & (EPOLLIN | EPOLLERR | EPOLLHUP)) != 0;
+                const auto write_ready =
+                    (each_.events & (EPOLLOUT | EPOLLERR | EPOLLHUP)) != 0;
+                if (read_ready) {
                     /* auto ptr_ = static_cast<fd_ops *>(each_.data.ptr);
                     if (ptr_) {
                         ptr_->read->complete();
                         } */
-                    if (ev.ops->read) {
-                        ev.ops->read->complete();
+                    if (ev.read) {
+                        ev.read->complete();
                     }
                 }
-                if (each_.events & EPOLLOUT) {
-                    if (ev.ops->write) {
+                if (write_ready) {
+                    if (ev.write) {
 
-                        ev.ops->write->complete();
+                        ev.write->complete();
                     }
                     /* auto ptr_ = static_cast<fd_ops *>(each_.data.ptr);
                     if (ptr_) {
@@ -117,14 +127,26 @@ public:
         auto it = fd_to_op.find(fd);
         if (it == fd_to_op.end()) {
             epoll_event ev{.events = event, .data = {.fd = fd}};
-
-            fd_to_op[fd] = {.ev = ev, .ops = op};
+            fd_state state{.ev = ev};
+            if ((event & std::to_underlying(register_type::EVENT_READ)) != 0) {
+                state.read = op->read;
+            }
+            if ((event & std::to_underlying(register_type::EVENT_WRITE)) != 0) {
+                state.write = op->write;
+            }
+            fd_to_op[fd] = state;
 
             epoll_manager_.add(fd, fd_to_op[fd].ev);
             return;
         }
-        fd_to_op[fd].ev.events |= event;
-        epoll_manager_.modify(fd, fd_to_op[fd].ev);
+        it->second.ev.events |= event;
+        if ((event & std::to_underlying(register_type::EVENT_READ)) != 0) {
+            it->second.read = op->read;
+        }
+        if ((event & std::to_underlying(register_type::EVENT_WRITE)) != 0) {
+            it->second.write = op->write;
+        }
+        epoll_manager_.modify(fd, it->second.ev);
     }
 
     void submit_read(int fd, fd_ops *op, use_awaiter_t) {
@@ -157,13 +179,24 @@ public:
     }
 
     void remove_op_impl(int fd, uint32_t event_) {
-        int n = fd_to_op[fd].ev.events - event_;
-        if (n == 0) {
+        auto it = fd_to_op.find(fd);
+        if (it == fd_to_op.end()) {
+            return;
+        }
+
+        it->second.ev.events &= ~event_;
+        if ((event_ & std::to_underlying(register_type::EVENT_READ)) != 0) {
+            it->second.read = nullptr;
+        }
+        if ((event_ & std::to_underlying(register_type::EVENT_WRITE)) != 0) {
+            it->second.write = nullptr;
+        }
+
+        if (it->second.ev.events == 0) {
             epoll_manager_.remove(fd);
-            fd_to_op.erase(fd);
+            fd_to_op.erase(it);
         } else {
-            fd_to_op[fd].ev.events -= event_;
-            epoll_manager_.modify(fd, fd_to_op[fd].ev);
+            epoll_manager_.modify(fd, it->second.ev);
         }
     }
     void remove_read(int fd) {
