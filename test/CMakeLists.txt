@@ -22,6 +22,7 @@ add_compile_options(-stdlib=libc++)
 add_link_options(-stdlib=libc++)
 endif()
 target_include_directories(${COMMON_SETTING} INTERFACE ${CMAKE_SOURCE_DIR}/include/async_frame)
+target_link_libraries(${COMMON_SETTING} INTERFACE TBB::tbb)
 set_target_properties(${COMMON_SETTING}
                        PROPERTIES
                        CXX_STANDARD 23

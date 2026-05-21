@@ -1,6 +1,7 @@
 cmake_minimum_required(VERSION 3.20)
 project(Chat_server)
 
+find_package(TBB REQUIRED)
 
 set(SERVER SERVER_END)
 set(CLIENT CLIENT_END)
@@ -9,6 +10,8 @@ add_executable(${SERVER} src/server.cpp)
 add_executable(${CLIENT} test_client.cpp)
 target_include_directories(${SERVER} PRIVATE include/async_frame)
 target_include_directories(${CLIENT} PRIVATE include/async_frame)
+target_link_libraries(${SERVER} PRIVATE TBB::tbb)
+target_link_libraries(${CLIENT} PRIVATE TBB::tbb)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 
