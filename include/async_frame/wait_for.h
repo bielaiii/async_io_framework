@@ -48,6 +48,9 @@ struct timer_awaiter {
         instance++;
         if (instance.current().time_point == TimerEvent::time_point_t{}) {
             s.remove_timer(instance.fd());
+        } else {
+            s.submit_timer(instance.fd(), &instance.current().state_,
+                           use_awaiter_t{});
         }
         return ec;
     }

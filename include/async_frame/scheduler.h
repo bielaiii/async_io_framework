@@ -65,9 +65,12 @@ public:
 
         constexpr size_t events_size = 128;
         epoll_event evs[events_size];
-        while (1) {
+        while (!fd_to_op.empty()) {
 
             int size_ = epoll_manager_.GetTask<events_size>(evs);
+            if (size_ <= 0) {
+                continue;
+            }
             for (int i = 0; i < size_; i++) {
 
                 auto each_ = evs[i];
@@ -75,7 +78,8 @@ public:
                 if (it == fd_to_op.end()) {
                     continue;
                 }
-                auto &ev = it->second;
+                auto *read_op = it->second.read;
+                auto *write_op = it->second.write;
                 const auto read_ready =
                     (each_.events & (EPOLLIN | EPOLLERR | EPOLLHUP)) != 0;
                 const auto write_ready =
@@ -85,14 +89,14 @@ public:
                     if (ptr_) {
                         ptr_->read->complete();
                         } */
-                    if (ev.read) {
-                        ev.read->complete();
+                    if (read_op) {
+                        read_op->complete();
                     }
                 }
                 if (write_ready) {
-                    if (ev.write) {
+                    if (write_op) {
 
-                        ev.write->complete();
+                        write_op->complete();
                     }
                     /* auto ptr_ = static_cast<fd_ops *>(each_.data.ptr);
                     if (ptr_) {
