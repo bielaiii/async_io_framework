@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <cstdio>
 #include <iterator>
+#include <exception>
 #include <print>
 
 #include "connection.h"
@@ -23,11 +24,12 @@ public:
 
     struct Task_Promise {
         RESULT_TYPE result;
+        std::exception_ptr eptr{};
         Task get_return_object() {
             return Task{
                 std::coroutine_handle<Task_Promise>::from_promise(*this)};
         }
-        void unhandled_exception() {}
+        void unhandled_exception() { eptr = std::current_exception(); }
 
         void return_value(RESULT_TYPE t) {
             if constexpr (std::is_same_v<std::pair<std::error_code, Connection>,
@@ -67,9 +69,19 @@ public:
     std::coroutine_handle<Task_Promise> handle = nullptr;
 
     Task() = default;
-    RESULT_TYPE copy_result() { return handle.promise().result; }
+    RESULT_TYPE copy_result() {
+        if (handle.promise().eptr) {
+            std::rethrow_exception(handle.promise().eptr);
+        }
+        return handle.promise().result;
+    }
 
-    RESULT_TYPE &result() { return handle.promise().result; }
+    RESULT_TYPE &result() {
+        if (handle.promise().eptr) {
+            std::rethrow_exception(handle.promise().eptr);
+        }
+        return handle.promise().result;
+    }
 
     ~Task() {
         if (handle) {
