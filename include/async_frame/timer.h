@@ -226,6 +226,17 @@ public:
     ~TimerEvent() noexcept = default;
 };
 
+template <typename SCHEDULER>
+void refresh_timer_registration(SCHEDULER &s) {
+    auto &instance = TimerEvent::get_instance();
+    if (instance.current_empty()) {
+        s.remove_timer(instance.fd());
+    } else {
+        s.submit_timer(instance.fd(), &instance.current().state_,
+                       use_awaiter_t{});
+    }
+}
+
 } // namespace detail
 } // namespace ASYNC_FRAME
 

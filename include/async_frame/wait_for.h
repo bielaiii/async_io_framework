@@ -46,12 +46,7 @@ struct timer_awaiter {
         auto &instance = TimerEvent::get_instance();
         instance.consume();
         instance++;
-        if (instance.current_empty()) {
-            s.remove_timer(instance.fd());
-        } else {
-            s.submit_timer(instance.fd(), &instance.current().state_,
-                           use_awaiter_t{});
-        }
+        refresh_timer_registration(s);
         return ec;
     }
 };

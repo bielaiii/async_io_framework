@@ -6,6 +6,7 @@
 #include <utility>
 #include "async_accept.h"
 #include "async_read.h"
+#include "async_write.h"
 #include "base.h"
 #include "connection.h"
 #include "do_read.h"
@@ -20,8 +21,27 @@ namespace detail {
 
 template <typename AWAITER_>
 Task<result_t> with_timeout_impl(AWAITER_ &op, timebase tb, handle_t h_) {
-    auto t = co_await op;
-    co_return t;
+    (void)h_;
+    if constexpr (requires { op.operation_kind(); }) {
+        using op_kind = decltype(op.operation_kind());
+        if constexpr (std::is_same_v<op_kind, read_operation_tag>) {
+            auto t =
+                co_await async_read_timeout(op.s, op.base_.conn, op.base_.buf,
+                                            tb.delay, use_awaiter_t{});
+            co_return t;
+        } else if constexpr (std::is_same_v<op_kind, write_operation_tag>) {
+            auto t =
+                co_await async_write_timeout(op.s, op.base_.conn, op.base_.buf,
+                                             tb.delay, use_awaiter_t{});
+            co_return t;
+        } else {
+            auto t = co_await op;
+            co_return t;
+        }
+    } else {
+        auto t = co_await op;
+        co_return t;
+    }
 }
 
 template <typename AWAITER_>
@@ -33,11 +53,9 @@ auto with_timeout(AWAITER_ op, std::chrono::nanoseconds delay) {
         AWAITER_T aw_;
         timebase tb;
         Task<result_t> result{};
-        Task<std::error_code> time_out_result;
         bool await_ready() noexcept { return false; }
         void await_suspend(handle_t t) noexcept {
             result = with_timeout_impl(aw_, tb, t);
-            time_out_result = wait_for_impl(aw_.s, tb);
         }
         result_t await_resume() noexcept { return result.result(); }
     };

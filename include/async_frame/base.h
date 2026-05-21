@@ -15,6 +15,9 @@ struct timeout_token {
     std::chrono::nanoseconds delay{};
 };
 
+struct read_operation_tag {};
+struct write_operation_tag {};
+
 template <typename CONNCETION_VIEW, typename BUFFER,
           typename CANCEL_TOKEN = noop_cancel_token,
           typename TIMER_TOKEN = no_timer_token>
