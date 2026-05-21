@@ -33,32 +33,18 @@ struct inner_recv_some_awaiter {
     CONNECTION_VIEWER conn;
     std::coroutine_handle<> outer_handle;
     BUFFER &buf;
-    std::coroutine_handle<> inner_handle;
-    result_t result; // not used
-    std::error_code ec{};
-    ssize_t already_read;
-    std::shared_ptr<coro_operation<SCHEDULER,CONNECTION_VIEWER, BUFFER>> sp;
-    ssize_t last_read{};
-    bool await_ready() noexcept {
-        auto [ec, byte_transformed, status_] = do_read(conn, buf, 0, buf.capacity());
-        last_read                   = byte_transformed;
-        if (status_ != async_op_status::COMPLETED) {
-            return false;
-        }
-        return true;
-    }
+    fd_ops state_{};
+    read_op read_{};
+    bool await_ready() noexcept { return false; }
     void await_suspend(std::coroutine_handle<> inner_) noexcept {
-        inner_handle = inner_;
-        sp = std::make_shared<coro_operation<SCHEDULER, CONNECTION_VIEWER, BUFFER>>(
-            conn, outer_handle, inner_, buf, result);
-        scheduler.register_event(conn.fd(), register_type::EVENT_READ, sp);
+        read_      = {.inner = inner_, .outer = outer_handle};
+        state_.fd  = conn.fd();
+        state_.read = &read_;
+        scheduler.submit_read(conn.fd(), &state_, use_awaiter_t{});
     }
     result_t await_resume() noexcept {
-        if (stop_reading_again(ec, already_read)) {
-            return {ec, static_cast<size_t>(last_read)};
-        }
-        auto [ec_, byte_transformed] = do_read(conn, buf, 0, buf.capacity());
-        return {ec_, byte_transformed};
+        scheduler.remove_read(conn.fd());
+        return try_read(conn, buf);
     }
 };
 

@@ -129,11 +129,7 @@ auto async_read_timeout(SCHEDULER &scheduler, CONNECTION_LIKE conn, BUFFER &buf,
             return true;
         }
 
-        result_t await_resume() noexcept {
-            s.unregister_event(base_.conn);
-
-            return result.result();
-        }
+        result_t await_resume() noexcept { return result.result(); }
     };
 
     return Awaiter{.base_{.conn = conn, .buf = buf}, .s = scheduler};

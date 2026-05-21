@@ -22,18 +22,18 @@ template <typename SCHEDULER, typename CONNECTION_VIEWER>
 struct inner_accept_awaiter {
     SCHEDULER &scheduler;
     CONNECTION_VIEWER conn;
-    share_handle outer_handle;
-    share_handle inner_handle;
-
-    DynamicBuffer buf{};
-    std::shared_ptr<accept_operation> sp;
+    handle_t outer_handle;
+    fd_ops state_{};
+    read_op read_{};
     bool await_ready() noexcept { return false; }
     void await_suspend(std::coroutine_handle<> inner_) noexcept {
-        inner_handle = inner_;
-        sp           = std::make_shared<accept_operation>(inner_, outer_handle);
-        scheduler.register_event(conn.fd(), register_type::EVENT_ACCEPT, sp);
+        read_      = {.inner = inner_, .outer = outer_handle};
+        state_.fd  = conn.fd();
+        state_.read = &read_;
+        scheduler.submit_accept(conn.fd(), &state_, use_awaiter_t{});
     }
     accept_result await_resume() noexcept {
+        scheduler.remove_accept(conn.fd());
         int fd = ::accept4(conn.fd(), nullptr, nullptr, SOCK_NONBLOCK);
         if (fd == -1) {
             return {std::error_code(errno, std::generic_category()), fd};
@@ -65,8 +65,8 @@ struct accept_awaiter {
     }
 
     std::pair<std::error_code, Connection> await_resume() noexcept {
-        return {result_.result().first,
-                std::move(Connection{result_.result().second})};
+        auto [ec, fd] = result_.result();
+        return {ec, Connection{fd}};
     }
 };
 

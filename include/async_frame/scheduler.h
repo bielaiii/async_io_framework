@@ -211,6 +211,10 @@ public:
         remove_op_impl(fd, std::to_underlying(register_type::EVENT_CONNECT));
     }
 
+    void remove_accept(int fd) {
+        remove_op_impl(fd, std::to_underlying(register_type::EVENT_ACCEPT));
+    }
+
     void remove_timer(int fd) {
         remove_op_impl(fd, std::to_underlying(register_type::EVENT_TIMER));
     }
