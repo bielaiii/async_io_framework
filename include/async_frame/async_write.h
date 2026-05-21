@@ -37,20 +37,35 @@ struct inner_send_awaiter {
     SCHEDULER &scheduler;
     fd_ops state_;
     write_op write_;
+    [[no_unique_address]] cancel_slot<CANCEL_TOKEN> cancel_;
 
     bool await_ready() noexcept { return false; }
 
-    void await_suspend(std::coroutine_handle<> inner) {
+    bool await_suspend(std::coroutine_handle<> inner) {
         base_.inner_ = inner;
+        if (base_.cancel_token.cancel()) {
+            return false;
+        }
         write_       = {.inner = inner, .outer = base_.outer_};
         state_.write = &write_;
         //scheduler.register_event(base_.conn.fd(), register_type::EVENT_WRITE,
         //                         &state_, use_awaiter_t{});
 
         scheduler.submit_write(base_.conn.fd(), &state_, use_awaiter_t{});
+        cancel_.submit(scheduler, base_.cancel_token, inner,
+                       base_.outer_);
+        return true;
     }
 
     auto await_resume() {
+        if (cancel_.is_cancel_event(base_.cancel_token)) {
+            cancel_.consume(base_.cancel_token);
+            scheduler.remove_write(base_.conn.fd());
+            cancel_.remove(scheduler, base_.cancel_token);
+            return write_ret_t{operation_cancelled_error(), 0,
+                               op_status::CANCELLED};
+        }
+        cancel_.remove(scheduler, base_.cancel_token);
         //scheduler.unregister_event(base_.conn, register_type::EVENT_WRITE,
         //                           &state_);
         scheduler.remove_write(base_.conn.fd());
@@ -67,11 +82,15 @@ struct inner_send_timeout_awaiter {
     write_op write_{};
     fd_ops timer_state_{};
     read_op timer_read_{};
+    [[no_unique_address]] cancel_slot<CANCEL_TOKEN> cancel_;
 
     bool await_ready() noexcept { return false; }
 
-    void await_suspend(std::coroutine_handle<> inner) {
+    bool await_suspend(std::coroutine_handle<> inner) {
         base_.inner_       = inner;
+        if (base_.cancel_token.cancel()) {
+            return false;
+        }
         write_             = {.inner = inner, .outer = base_.outer_};
         write_state_.fd    = base_.conn.fd();
         write_state_.write = &write_;
@@ -84,10 +103,22 @@ struct inner_send_timeout_awaiter {
         auto &timer       = TimerEvent::get_instance();
         timer.set_timer(&timer_state_, base_.timer_token.delay);
         refresh_timer_registration(scheduler);
+        cancel_.submit(scheduler, base_.cancel_token, inner,
+                       base_.outer_);
+        return true;
     }
 
     write_ret_t await_resume() {
         auto &timer = TimerEvent::get_instance();
+        if (cancel_.is_cancel_event(base_.cancel_token)) {
+            cancel_.consume(base_.cancel_token);
+            timer.cancel(&timer_read_);
+            scheduler.remove_write(base_.conn.fd());
+            cancel_.remove(scheduler, base_.cancel_token);
+            refresh_timer_registration(scheduler);
+            return {operation_cancelled_error(), 0, op_status::CANCELLED};
+        }
+        cancel_.remove(scheduler, base_.cancel_token);
         const bool timed_out =
             timer.is_current(&timer_read_) && timer.get_timer().count() == 0;
         if (timed_out) {
@@ -116,7 +147,7 @@ async_write_impl(Base<CONNECTION_LIKE, BUFFER_VIEW, CANCEL_TOKEN> base_,
     while (1) {
         auto [ec, len, stat_] =
             co_await inner_send_awaiter<SCHEDULER, CONNECTION_LIKE,
-                                        BUFFER_VIEW>{base_, s};
+                                        BUFFER_VIEW, CANCEL_TOKEN>{base_, s};
         total_len += len;
         if (stat_ == op_status::INPROGRESS) {
             continue;
@@ -149,7 +180,8 @@ Task<result_t> async_write_timeout_impl(
 template <typename SCHEDULER, typename CONNECTION_LIKE, typename BUFFER_VIEW,
           typename CANCEL_TOKEN = noop_cancel_token>
 auto async_write(SCHEDULER &scheduler, CONNECTION_LIKE conn,
-                 BUFFER_VIEW &byte_views, use_awaiter_t, CANCEL_TOKEN = {}) {
+                 BUFFER_VIEW &byte_views, use_awaiter_t,
+                 CANCEL_TOKEN cancel_token = {}) {
     struct Awaiter {
         Base<CONNECTION_LIKE, BUFFER_VIEW, CANCEL_TOKEN> base_;
         SCHEDULER &s;
@@ -169,8 +201,10 @@ auto async_write(SCHEDULER &scheduler, CONNECTION_LIKE conn,
         result_t await_resume() noexcept { return result.result(); }
     };
 
-    return Awaiter{.base_ = {.conn = conn, .buf = byte_views},
-                         .s     = scheduler};
+    return Awaiter{.base_ = {.conn = conn,
+                             .buf = byte_views,
+                             .cancel_token = cancel_token},
+                   .s     = scheduler};
 }
 
 template <typename SCHEDULER, typename CONNECTION_LIKE, typename BUFFER_VIEW,
@@ -178,7 +212,7 @@ template <typename SCHEDULER, typename CONNECTION_LIKE, typename BUFFER_VIEW,
 auto async_write_timeout(SCHEDULER &scheduler, CONNECTION_LIKE conn,
                          BUFFER_VIEW &byte_views,
                          std::chrono::nanoseconds nanosec_, use_awaiter_t,
-                         CANCEL_TOKEN = {}) {
+                         CANCEL_TOKEN cancel_token = {}) {
     struct Awaiter {
         Base<CONNECTION_LIKE, BUFFER_VIEW, CANCEL_TOKEN, timeout_token> base_;
         SCHEDULER &s;
@@ -200,6 +234,7 @@ auto async_write_timeout(SCHEDULER &scheduler, CONNECTION_LIKE conn,
 
     return Awaiter{.base_ = {.conn = conn,
                              .buf = byte_views,
+                             .cancel_token = cancel_token,
                              .timer_token = timeout_token{nanosec_}},
                    .s     = scheduler};
 }

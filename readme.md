@@ -7,7 +7,7 @@
 - [x] 支持定时器功能
 - [ ] 支持read_at, read_untile(因为asio有)
 - [x] 支持读一些内容（不要求读满buffer）
-- [ ] 支持取消异步读写
+- [x] 支持取消异步读写
 - [ ] 惰性求值
 - [ ] 未来支持std::execution
 

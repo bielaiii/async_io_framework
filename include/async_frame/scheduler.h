@@ -182,6 +182,11 @@ public:
                           std::to_underlying(register_type::EVENT_TIMER));
     }
 
+    void submit_cancel(int fd, fd_ops *op, use_awaiter_t) {
+        submit_event_impl(fd, op,
+                          std::to_underlying(register_type::EVENT_READ));
+    }
+
     void remove_op_impl(int fd, uint32_t event_) {
         auto it = fd_to_op.find(fd);
         if (it == fd_to_op.end()) {
@@ -221,6 +226,10 @@ public:
 
     void remove_timer(int fd) {
         remove_op_impl(fd, std::to_underlying(register_type::EVENT_TIMER));
+    }
+
+    void remove_cancel(int fd) {
+        remove_op_impl(fd, std::to_underlying(register_type::EVENT_READ));
     }
 
     /* void modify_event(int fd, register_type type_, fd_state *state) {

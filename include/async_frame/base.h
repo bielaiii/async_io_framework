@@ -3,6 +3,7 @@
 
 #include <chrono>
 #include <coroutine>
+#include <type_traits>
 #include "cancellation_token.h"
 #include "scheduler_type_traits.h"
 
@@ -17,6 +18,10 @@ struct timeout_token {
 
 struct read_operation_tag {};
 struct write_operation_tag {};
+
+inline std::error_code operation_cancelled_error() noexcept {
+    return std::make_error_code(std::errc::operation_canceled);
+}
 
 template <typename CONNCETION_VIEW, typename BUFFER,
           typename CANCEL_TOKEN = noop_cancel_token,

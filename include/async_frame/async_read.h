@@ -42,16 +42,30 @@ struct inner_recv_awaiter {
     SCHEDULER &scheduler;
     fd_ops state_;
     read_op read_;
+    [[no_unique_address]] cancel_slot<CANCEL_TOKEN> cancel_;
     bool await_ready() noexcept { return false; }
-    void await_suspend(std::coroutine_handle<> inner_) noexcept {
+    bool await_suspend(std::coroutine_handle<> inner_) noexcept {
         base_.inner_ = inner_;
+        if (base_.cancel_token.cancel()) {
+            return false;
+        }
         read_        = {.inner = inner_, .outer = base_.outer_};
         state_.read  = &read_;
         //scheduler.register_event(base_.conn.fd(), register_type::EVENT_READ,
         //                         &state_, use_awaiter_t{});
         scheduler.submit_read(base_.conn.fd(), &state_, use_awaiter_t{});
+        cancel_.submit(scheduler, base_.cancel_token, inner_,
+                       base_.outer_);
+        return true;
     }
     result_t await_resume() noexcept {
+        if (cancel_.is_cancel_event(base_.cancel_token)) {
+            cancel_.consume(base_.cancel_token);
+            scheduler.remove_read(base_.conn.fd());
+            cancel_.remove(scheduler, base_.cancel_token);
+            return {operation_cancelled_error(), base_.buf.read_count()};
+        }
+        cancel_.remove(scheduler, base_.cancel_token);
         auto [ec, byte_transformed] = try_read(base_.conn, base_.buf);
         //scheduler.unregister_event(base_.conn, register_type::EVENT_READ,
         //                           &state_);
@@ -69,11 +83,15 @@ struct inner_recv_timeout_awaiter {
     read_op read_{};
     fd_ops timer_state_{};
     read_op timer_read_{};
+    [[no_unique_address]] cancel_slot<CANCEL_TOKEN> cancel_;
 
     bool await_ready() noexcept { return false; }
 
-    void await_suspend(std::coroutine_handle<> inner_) noexcept {
+    bool await_suspend(std::coroutine_handle<> inner_) noexcept {
         base_.inner_     = inner_;
+        if (base_.cancel_token.cancel()) {
+            return false;
+        }
         read_            = {.inner = inner_, .outer = base_.outer_};
         read_state_.fd   = base_.conn.fd();
         read_state_.read = &read_;
@@ -85,10 +103,22 @@ struct inner_recv_timeout_awaiter {
         auto &timer       = TimerEvent::get_instance();
         timer.set_timer(&timer_state_, base_.timer_token.delay);
         refresh_timer_registration(scheduler);
+        cancel_.submit(scheduler, base_.cancel_token, inner_,
+                       base_.outer_);
+        return true;
     }
 
     result_t await_resume() noexcept {
         auto &timer = TimerEvent::get_instance();
+        if (cancel_.is_cancel_event(base_.cancel_token)) {
+            cancel_.consume(base_.cancel_token);
+            timer.cancel(&timer_read_);
+            scheduler.remove_read(base_.conn.fd());
+            cancel_.remove(scheduler, base_.cancel_token);
+            refresh_timer_registration(scheduler);
+            return {operation_cancelled_error(), base_.buf.read_count()};
+        }
+        cancel_.remove(scheduler, base_.cancel_token);
         const bool timed_out =
             timer.is_current(&timer_read_) && timer.get_timer().count() == 0;
         if (timed_out) {
@@ -187,7 +217,8 @@ auto async_read(SCHEDULER &scheduler, CONNECTION_LIKE conn, BUFFER &buf,
 template <typename SCHEDULER, typename CONNECTION_LIKE, typename BUFFER,
           typename CANCEL_TOKEN = noop_cancel_token>
 auto async_read_timeout(SCHEDULER &scheduler, CONNECTION_LIKE conn, BUFFER &buf,
-                        std::chrono::nanoseconds nanosec_, use_awaiter_t) {
+                        std::chrono::nanoseconds nanosec_, use_awaiter_t,
+                        CANCEL_TOKEN cancel_token = {}) {
 
     struct Awaiter {
         Base<CONNECTION_LIKE, BUFFER, CANCEL_TOKEN, timeout_token> base_;
@@ -211,6 +242,7 @@ auto async_read_timeout(SCHEDULER &scheduler, CONNECTION_LIKE conn, BUFFER &buf,
 
     return Awaiter{.base_{.conn = conn,
                           .buf = buf,
+                          .cancel_token = cancel_token,
                           .timer_token = timeout_token{nanosec_}},
                    .s = scheduler};
 }

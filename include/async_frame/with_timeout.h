@@ -27,12 +27,14 @@ Task<result_t> with_timeout_impl(AWAITER_ &op, timebase tb, handle_t h_) {
         if constexpr (std::is_same_v<op_kind, read_operation_tag>) {
             auto t =
                 co_await async_read_timeout(op.s, op.base_.conn, op.base_.buf,
-                                            tb.delay, use_awaiter_t{});
+                                            tb.delay, use_awaiter_t{},
+                                            op.base_.cancel_token);
             co_return t;
         } else if constexpr (std::is_same_v<op_kind, write_operation_tag>) {
             auto t =
                 co_await async_write_timeout(op.s, op.base_.conn, op.base_.buf,
-                                             tb.delay, use_awaiter_t{});
+                                             tb.delay, use_awaiter_t{},
+                                             op.base_.cancel_token);
             co_return t;
         } else {
             auto t = co_await op;
