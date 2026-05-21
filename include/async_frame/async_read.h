@@ -68,10 +68,10 @@ Task<result_t> async_read_impl(Base<CONNECTION_LIKE, BUFFER, CANCEL_TOKEN> base,
             co_await inner_recv_awaiter<SCHEDULER, CONNECTION_LIKE, BUFFER,
                                         CANCEL_TOKEN>{base, s};
         if (ec) {
-            co_return {ec, 0};
+            co_return {ec, base.buf.read_count()};
         }
         if (byte_transformed == 0) {
-            co_return {ec, 0};
+            co_return {ec, base.buf.read_count()};
         }
         if (base.buf.done()) {
             co_return std::make_pair(ec, base.buf.read_count());

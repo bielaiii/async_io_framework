@@ -62,14 +62,16 @@ template <typename SCHEDULER, typename CONNECTION_LIKE, typename BUFFER_VIEW,
 Task<result_t>
 async_write_impl(Base<CONNECTION_LIKE, BUFFER_VIEW, CANCEL_TOKEN> base_,
                  SCHEDULER &s) {
+    size_t total_len = 0;
     while (1) {
         auto [ec, len, stat_] =
             co_await inner_send_awaiter<SCHEDULER, CONNECTION_LIKE,
                                         BUFFER_VIEW>{base_, s};
+        total_len += len;
         if (stat_ == op_status::INPROGRESS) {
             continue;
         }
-        co_return {ec, len};
+        co_return {ec, total_len};
     }
     co_return {};
 }
