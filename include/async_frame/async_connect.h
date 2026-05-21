@@ -14,6 +14,7 @@
 #include "try_connect.h"
 #include <sys/socket.h>
 #include <system_error>
+#include <unistd.h>
 #include<print>
 
 namespace ASYNC_FRAME {
@@ -98,6 +99,7 @@ auto async_connect(SCHEDULER &s, const char *ip, int port) {
         std::pair<std::error_code, Connection> await_resume() noexcept {
             auto ec = result_.result();
             if (ec) {
+                ::close(conn.fd());
                 return {ec,std::move(Connection(-1))};
             }
             return {{}, std::move(Connection(conn.fd()))};

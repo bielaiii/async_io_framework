@@ -37,16 +37,24 @@ public:
 
     int fd() noexcept { return fd_; }
 
-    Connection(Connection &&other) noexcept {
-        auto temp_ = Connection(-1);
+    Connection(Connection &&other) noexcept : fd_(std::exchange(other.fd_, -1)) {}
 
-        swap(*this, other);
-        swap(other, temp_);
+    Connection &operator=(Connection &&other) noexcept {
+        if (this != &other) {
+            close_fd();
+            fd_ = std::exchange(other.fd_, -1);
+        }
+        return *this;
     }
 
     Connection_Viewer get_viewer() noexcept { return Connection_Viewer{fd_}; }
 
-    void close_fd() noexcept { ::close(fd_); }
+    void close_fd() noexcept {
+        if (fd_ != -1) {
+            ::close(fd_);
+            fd_ = -1;
+        }
+    }
 
     void async_read() noexcept;
 
