@@ -75,7 +75,7 @@ struct FamilyTraits<IPV4> {
         std::memset(&addr, 0, sizeof(Type));
         addr.sin_family = AF_INET;
         addr.sin_port   = htons(port);
-        if (ip == "") {
+        if (ip == nullptr || ip[0] == '\0') {
             addr.sin_addr.s_addr = INADDR_ANY;
             return true;
         }
@@ -94,7 +94,7 @@ struct FamilyTraits<IPV6> {
         std::memset(&addr, 0, sizeof(Type));
         addr.sin6_family = AF_INET6;
         addr.sin6_port   = htons(port);
-        if (ip == "") {
+        if (ip == nullptr || ip[0] == '\0') {
             addr.sin6_addr = IN6ADDR_ANY_INIT;
             return true;
         }
@@ -139,13 +139,13 @@ struct ConnectionBuilder {
 
         addr_type addr;
 
-        FamilyTraits<FAMILY>::parse(addr, ip, port);
+        FamilyTraits<FAMILY>::parse(addr, port, ip);
 
         if (fd < 0) {
             throw std::runtime_error("socket() failed");
         }
 
-        if (::connect(fd, addr, sizeof(addr))) {
+        if (::connect(fd, reinterpret_cast<sockaddr *>(&addr), sizeof(addr))) {
         }
 
         return fd;
@@ -189,9 +189,9 @@ struct ConnectionBuilder<FAMILY, PROTOCAL, SERVER_ROLE> {
 
         addr_type addr;
 
-        FamilyTraits<FAMILY>::parse(addr, ip, port);
+        FamilyTraits<FAMILY>::parse(addr, port, ip);
 
-        if (::bind(fd, addr, sizeof(addr_type)) == -1) {
+        if (::bind(fd, reinterpret_cast<sockaddr *>(&addr), sizeof(addr_type)) == -1) {
             auto err_msg = std::format("bind() : {}", strerror(errno));
             throw std::runtime_error(err_msg.c_str());
         }
@@ -221,9 +221,9 @@ struct ConnectionBuilder<FAMILY, PROTOCAL, CLENT_ROLE> {
 
 /* default ip address = INADDR_ANY or IN6ADDR_ANY */
 template <typename FAMILY, typename PROTOCAL>
-Connection BuilderServer(int port, char *ip = "") {
-    int fd = ConnectionBuilder<FAMILY, PROTOCAL, SERVER_ROLE>::build(ip, port);
-    return std::move(Connection{fd});
+Connection BuilderServer(int port, const char *ip = "") {
+    int fd = ConnectionBuilder<FAMILY, PROTOCAL, SERVER_ROLE>::build(port, ip);
+    return Connection{fd};
 }
 
 template <typename FAMILY, typename PROTOCAL>
