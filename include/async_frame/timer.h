@@ -116,6 +116,13 @@ public:
         }
     }
 
+    void clear_timer() {
+        struct itimerspec utmr {};
+        if (timerfd_settime(fd_.fd(), 0, &utmr, nullptr) < 0) {
+            ERR_MSG;
+        }
+    }
+
     void consume() noexcept {
         uint64_t expirations = 0;
         while (::read(fd_.fd(), &expirations, sizeof(expirations)) == -1 &&
@@ -129,6 +136,7 @@ public:
     TimerEvent &operator++(int) {
         if (waiting_queue.empty()) {
             cur = TimerTask{};
+            clear_timer();
             return *this;
         }
         cur                    = waiting_queue.top();
@@ -137,6 +145,36 @@ public:
 
         waiting_queue.pop();
         return *this;
+    }
+
+    [[nodiscard]] bool current_empty() const noexcept {
+        return cur.time_point == time_point_t{};
+    }
+
+    [[nodiscard]] bool is_current(read_op *read) const noexcept {
+        return cur.state_.read == read;
+    }
+
+    void cancel(read_op *read) {
+        if (read == nullptr) {
+            return;
+        }
+        if (cur.state_.read == read) {
+            (*this)++;
+            return;
+        }
+
+        std::vector<TimerTask> remaining;
+        remaining.reserve(waiting_queue.size());
+        while (!waiting_queue.empty()) {
+            auto task = waiting_queue.top();
+            waiting_queue.pop();
+            if (task.state_.read != read) {
+                remaining.push_back(task);
+            }
+        }
+        waiting_queue =
+            decltype(waiting_queue)(TimerTaskComp{}, std::move(remaining));
     }
 
     void set_timer(fd_ops *state_, time_unit_t delay) noexcept {

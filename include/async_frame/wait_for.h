@@ -46,7 +46,7 @@ struct timer_awaiter {
         auto &instance = TimerEvent::get_instance();
         instance.consume();
         instance++;
-        if (instance.current().time_point == TimerEvent::time_point_t{}) {
+        if (instance.current_empty()) {
             s.remove_timer(instance.fd());
         } else {
             s.submit_timer(instance.fd(), &instance.current().state_,

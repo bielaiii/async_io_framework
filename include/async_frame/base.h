@@ -1,6 +1,7 @@
 #ifndef COROUTINE_BASE_HEADER
 #define COROUTINE_BASE_HEADER
 
+#include <chrono>
 #include <coroutine>
 #include "cancellation_token.h"
 #include "scheduler_type_traits.h"
@@ -8,8 +9,15 @@
 namespace ASYNC_FRAME {
 namespace detail {
 
+struct no_timer_token {};
+
+struct timeout_token {
+    std::chrono::nanoseconds delay{};
+};
+
 template <typename CONNCETION_VIEW, typename BUFFER,
-          typename CANCEL_TOKEN = noop_cancel_token>
+          typename CANCEL_TOKEN = noop_cancel_token,
+          typename TIMER_TOKEN = no_timer_token>
 struct Base {
     // SCHEDULER &s;
     CONNCETION_VIEW conn;
@@ -17,6 +25,7 @@ struct Base {
     std::coroutine_handle<> outer_;
     std::coroutine_handle<> inner_;
     [[no_unique_address]] CANCEL_TOKEN cancel_token;
+    [[no_unique_address]] TIMER_TOKEN timer_token;
 };
 
 struct status {
