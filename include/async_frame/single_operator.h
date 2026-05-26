@@ -73,6 +73,10 @@ struct fd_ops {
 
 template <typename CANCEL_TOKEN>
 struct cancel_slot {
+    static_assert(EVENT_CANCEL_TOKEN<CANCEL_TOKEN>,
+                  "cancel_slot requires a cancel token with cancel(), fd(), "
+                  "and consume(); use noop_cancel_token for no cancellation");
+
     fd_ops state{};
     read_op read{};
 

@@ -1,0 +1,16 @@
+---
+BasedOnStyle: LLVM
+AccessModifierOffset: '-2'
+AlignAfterOpenBracket: Align
+AlignConsecutiveMacros: 'true'
+AlignConsecutiveAssignments: 'true'
+AlignEscapedNewlines: Right
+AlignTrailingComments: 'true'
+AllowAllParametersOfDeclarationOnNextLine: 'true'
+AllowShortBlocksOnASingleLine: 'true'
+AllowShortCaseLabelsOnASingleLine: 'true'
+ColumnLimit: '80'
+IndentWidth: '2'
+TabWidth: '2'
+UseTab: Never
+BreakTemplateDeclarations: Yes

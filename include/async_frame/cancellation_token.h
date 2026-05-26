@@ -2,6 +2,7 @@
 #define CANCELLATION_TOKEN
 
 #include <atomic>
+#include <concepts>
 #include <cstdlib>
 #include <memory>
 #include <stdexcept>
@@ -9,12 +10,26 @@
 #include <unistd.h>
 #include <sys/eventfd.h>
 template <typename CANCEL_TOKEN>
-concept CANCEL_TOKEN_LIKE = requires(CANCEL_TOKEN token) { token.cancel(); };
+concept CANCEL_TOKEN_LIKE = requires(const CANCEL_TOKEN token) {
+    { token.cancel() } -> std::convertible_to<bool>;
+};
+
+template <typename CANCEL_TOKEN>
+concept EVENT_CANCEL_TOKEN = CANCEL_TOKEN_LIKE<CANCEL_TOKEN> &&
+    requires(const CANCEL_TOKEN token) {
+        { token.fd() } -> std::convertible_to<int>;
+        token.consume();
+    };
 
 struct noop_cancel_token {
-    [[nodiscard]] constexpr bool cancel() noexcept { return false; };
+    [[nodiscard]] constexpr bool cancel() const noexcept { return false; };
+    constexpr void request_cancel() const noexcept {}
+    constexpr void consume() const noexcept {}
     constexpr void throw_if_cancel() const {}
 };
+
+using no_cancel_token = noop_cancel_token;
+inline constexpr no_cancel_token no_cancel{};
 
 // the error code will be operation_canceled
 // the byte_transformed will be zero

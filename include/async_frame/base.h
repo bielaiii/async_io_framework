@@ -3,6 +3,7 @@
 
 #include <chrono>
 #include <coroutine>
+#include <atomic>
 #include <type_traits>
 #include "cancellation_token.h"
 #include "scheduler_type_traits.h"
@@ -36,22 +37,30 @@ struct Base {
     [[no_unique_address]] TIMER_TOKEN timer_token;
 };
 
-struct status {
-    op_status result;
-    bool cancel() {
-        switch (result) {
-        case op_status::COMPLETED:
-        case op_status::TIMEOUT: return 1;
-        default: return false;
-        }
-    }
-};
-
 template <typename CANCEL_TOKEN = noop_cancel_token>
-struct Shared_Status {
+struct operation_context {
     std::coroutine_handle<> outer_;
     std::coroutine_handle<> inner_;
     [[no_unique_address]] CANCEL_TOKEN *cancel_token;
+};
+
+struct operation_state {
+    std::atomic<op_status> result{op_status::INPROGRESS};
+
+    [[nodiscard]] bool try_finish(op_status next) noexcept {
+        auto expected = op_status::INPROGRESS;
+        return result.compare_exchange_strong(expected, next,
+                                              std::memory_order_acq_rel,
+                                              std::memory_order_acquire);
+    }
+
+    [[nodiscard]] op_status status() const noexcept {
+        return result.load(std::memory_order_acquire);
+    }
+
+    [[nodiscard]] bool finished() const noexcept {
+        return status() != op_status::INPROGRESS;
+    }
 };
 
 } // namespace detail
