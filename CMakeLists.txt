@@ -2,6 +2,7 @@ cmake_minimum_required(VERSION 3.20)
 project(Chat_server)
 
 find_package(TBB REQUIRED)
+include(CTest)
 
 set(SERVER SERVER_END)
 set(CLIENT CLIENT_END)
@@ -30,4 +31,6 @@ else()
 	target_compile_features(${CLIENT} PRIVATE cxx_std_23)
 endif()
 
-add_subdirectory(test)
+if(BUILD_TESTING)
+	add_subdirectory(test)
+endif()

@@ -13,7 +13,7 @@ struct StaticBuffer {
     size_t offset{};
     auto size() noexcept { return buf.size(); }
     auto data() noexcept { return buf.data(); }
-    auto capacity() noexcept { return buf.capacity(); }
+    auto capacity() noexcept { return buf.size(); }
     auto seek() noexcept { return data() + offset; }
     auto remain() noexcept { return capacity() - offset; }
     auto done() noexcept { return remain() == 0; }
