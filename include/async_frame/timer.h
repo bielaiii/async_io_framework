@@ -10,6 +10,8 @@
 #include <queue>
 #include <ratio>
 #include <stdexcept>
+#include <unordered_map>
+#include <unordered_set>
 #include <unistd.h>
 #include <utility>
 #include <vector>
@@ -35,6 +37,7 @@ private:
     struct TimerTask {
         fd_ops state_;
         time_point_t time_point;
+        std::uint64_t id{};
     };
     struct TimerTaskComp {
         bool operator()(const TimerTask &lhs, const TimerTask &rhs) {
@@ -46,6 +49,9 @@ private:
     fdo fd_;
     std::priority_queue<TimerTask, std::vector<TimerTask>, TimerTaskComp>
         waiting_queue{};
+    std::uint64_t next_timer_id{1};
+    std::unordered_map<read_op *, std::uint64_t> active_timer_ids{};
+    std::unordered_set<std::uint64_t> cancelled_timer_ids{};
 
     static fdo create_time_fd() {
         int temp_fd_ = timerfd_create(CLOCK_MONOTONIC, 0);
@@ -58,6 +64,51 @@ private:
     }
 
     TimerEvent() : fd_(create_time_fd()), waiting_queue() {};
+
+    [[nodiscard]] static bool empty_task(const TimerTask &task) noexcept {
+        return task.time_point == time_point_t{};
+    }
+
+    void remember_active(const TimerTask &task) {
+        if (task.state_.read != nullptr) {
+            active_timer_ids[task.state_.read] = task.id;
+        }
+    }
+
+    void forget_active(const TimerTask &task) {
+        auto *read = task.state_.read;
+        if (read == nullptr) {
+            return;
+        }
+        auto it = active_timer_ids.find(read);
+        if (it != active_timer_ids.end() && it->second == task.id) {
+            active_timer_ids.erase(it);
+        }
+    }
+
+    bool consume_cancelled(const TimerTask &task) {
+        if (task.id == 0) {
+            return false;
+        }
+        return cancelled_timer_ids.erase(task.id) != 0;
+    }
+
+    void activate_next_timer() {
+        while (!waiting_queue.empty()) {
+            auto task = waiting_queue.top();
+            waiting_queue.pop();
+            if (consume_cancelled(task)) {
+                forget_active(task);
+                continue;
+            }
+            cur = task;
+            update_timer(cur.time_point);
+            return;
+        }
+
+        cur = TimerTask{};
+        clear_timer();
+    }
 
 public:
     TimerEvent(const TimerEvent &)            = delete;
@@ -84,23 +135,6 @@ public:
         return {.tv_sec  = second_.time_since_epoch().count(),
                 .tv_nsec = nsecond_.count()};
     }
-
-    /* template <typename SCHEDULER>
-    void set_next_timer(SCHEDULER &s) noexcept {
-        auto &last_time        = waiting_queue.top();
-        time_point_t delay_    = last_time.time_point;
-        struct itimerspec utmr = {
-            .it_interval = {},
-            .it_value    = to_timespec(delay_),
-        };
-        state_ = last_time.state_;
-        cur    = delay_;
-        epoll_event ev{.events = std::to_underlying(register_type::EVENT_TIMER),
-                       .data   = {.ptr = &state_}};
-
-        // we use absolute time
-        timerfd_settime(fd_.fd(), TFD_TIMER_ABSTIME, &utmr, nullptr);
-    } */
 
     Connection_Viewer conn() noexcept { return Connection_Viewer(fd_.fd()); }
 
@@ -130,25 +164,21 @@ public:
         }
     }
 
-    // cur save the current setting, epoll resume with this address
-    // queue.top() == cur
-
     TimerEvent &operator++(int) {
-        if (waiting_queue.empty()) {
-            cur = TimerTask{};
-            clear_timer();
-            return *this;
-        }
-        cur                    = waiting_queue.top();
-        
-        update_timer(cur.time_point);
-
-        waiting_queue.pop();
+        forget_active(cur);
+        activate_next_timer();
         return *this;
     }
 
+    void refresh_current_timer() {
+        if (empty_task(cur) || consume_cancelled(cur)) {
+            forget_active(cur);
+            activate_next_timer();
+        }
+    }
+
     [[nodiscard]] bool current_empty() const noexcept {
-        return cur.time_point == time_point_t{};
+        return empty_task(cur);
     }
 
     [[nodiscard]] bool is_current(read_op *read) const noexcept {
@@ -159,34 +189,27 @@ public:
         if (read == nullptr) {
             return;
         }
-        if (cur.state_.read == read) {
-            (*this)++;
+        auto it = active_timer_ids.find(read);
+        if (it == active_timer_ids.end()) {
             return;
         }
-
-        std::vector<TimerTask> remaining;
-        remaining.reserve(waiting_queue.size());
-        while (!waiting_queue.empty()) {
-            auto task = waiting_queue.top();
-            waiting_queue.pop();
-            if (task.state_.read != read) {
-                remaining.push_back(task);
-            }
-        }
-        waiting_queue =
-            decltype(waiting_queue)(TimerTaskComp{}, std::move(remaining));
+        cancelled_timer_ids.insert(it->second);
+        active_timer_ids.erase(it);
     }
 
     void set_timer(fd_ops *state_, time_unit_t delay) noexcept {
+        refresh_current_timer();
         auto final_time = to_time_point(delay);
+        TimerTask task_{.state_ = *state_,
+                        .time_point = final_time,
+                        .id = next_timer_id++};
+        remember_active(task_);
         if (cur.time_point == time_point_t{}) {
-            cur.time_point = final_time;
-            cur.state_ = *state_;
+            cur = task_;
             update_timer(final_time);
             return;
         }
 
-        TimerTask task_{.state_ = *state_, .time_point = final_time};
         if (cur.time_point > final_time) {
             waiting_queue.push(cur);
             cur = task_;
@@ -199,21 +222,6 @@ public:
     }
 
     bool empty() noexcept { return waiting_queue.empty(); }
-
-    /* template <typename SCHEDULER>
-    int next_timer(SCHEDULER &s) {
-
-        waiting_queue.pop();
-        if (waiting_queue.empty()) {
-            s.unregister_event(Connection_Viewer(fd()),
-                               register_type::EVENT_TIMER, nullptr);
-            return 0;
-        }
-
-        set_next_timer(s);
-
-        return 1;
-    } */
 
     std::chrono::nanoseconds get_timer() noexcept {
         struct itimerspec tv;
@@ -229,6 +237,7 @@ public:
 template <typename SCHEDULER>
 void refresh_timer_registration(SCHEDULER &s) {
     auto &instance = TimerEvent::get_instance();
+    instance.refresh_current_timer();
     if (instance.current_empty()) {
         s.remove_timer(instance.fd());
     } else {
